@@ -1,0 +1,107 @@
+---
+title: "Se_aprende_haciendo_intro_estadistica"
+author: "JUAN JOSE LEON"
+date: "2023-11-08"
+output: github_document
+---
+
+# LLAMANDO A LA BASE DE DATOS
+
+```{r}
+data <- read.csv("C:\\Users\\ASUS_PC\\Documents\\CURSOS RSTUDIO\\PROGRAMA EXPERTO EN CIENCIA DE DATOS\\BASES_DATOS_BASES\\Iowa_Liquor_Sales_YG84CD.csv",
+                 stringsAsFactors = F,
+                 header = T)
+
+library(dplyr)
+library(tidyverse)
+
+datos <- data %>% 
+  mutate(Sale..Dollars.=(as.numeric(substr(data$Sale..Dollars.,2,15))),
+         City = toupper(City),
+         Store.Name = toupper(Store.Name),
+         Date = as.Date(Date, format = "%m/%d/%Y"),
+         anio = lubridate::year(Date)) %>%
+  rename(ventas = Sale..Dollars.,
+         ciudad = City,
+         categoria = Category.Name,
+         nombre_tienda = Store.Name)
+```
+
+
+# TOP 5 TIENDAS (PROMEDIO VENTAS) AÑO 2016 PARA LA CIUDAD CEDAR RAPIDS
+```{r}
+
+PromventasCedarRapids <- datos %>% select(Store.Number,nombre_tienda,ciudad,ventas,anio) %>% 
+  filter(ciudad=="CEDAR RAPIDS" & anio == 2016) %>% 
+  group_by(Store.Number) %>% 
+  summarise(prom_ventas_2016 = mean(ventas)) %>% 
+  arrange(-prom_ventas_2016)
+
+Top5tiendas2016 <- PromventasCedarRapids[1:5,]
+
+
+```
+
+# TOP 5 PEORES VENDEDORES (PROMEDIO VENTAS) PARA EL AÑO 2016 PARA DAVENPORT
+
+```{r}
+
+ventasXvendedor2016 <- datos %>% select(Vendor.Number,Vendor.Name,anio,ciudad,ventas) %>% 
+  mutate(Vendor.Name = toupper(Vendor.Name)) %>% 
+  filter(ciudad == "DAVENPORT" & anio ==2016) %>% 
+  group_by(Vendor.Number) %>% 
+  summarise(prom_ventas_2016 = mean(ventas)) %>% 
+  arrange(-prom_ventas_2016)
+
+peores5vendedores_Davenport <- ventasXvendedor2016[1:5,]
+
+```
+
+# TOP 5 de productos más vendidos, para el 2016 y 2017
+
+```{r}
+
+suma_ventasXproducto2016 <- datos %>% select(Item.Number,Item.Description,anio,ventas) %>% 
+  mutate(Item.Description = toupper(Item.Description)) %>%
+  filter(anio == 2016) %>% 
+  group_by(Item.Description , anio) %>% 
+  summarise(suma_ventas = sum(ventas)) %>% 
+  arrange(-suma_ventas) %>% 
+  pivot_wider(names_from = anio,
+              values_from = c(suma_ventas), names_prefix = "Ventas_",
+              values_fill = 0)
+
+Top5productos2016 <- suma_ventasXproducto2016[1:5,]
+
+
+suma_ventasXproducto2017 <- datos %>% select(Item.Number,Item.Description,anio,ventas) %>% 
+  mutate(Item.Description = toupper(Item.Description)) %>%
+  filter(anio == 2017) %>% 
+  group_by(Item.Description , anio) %>% 
+  summarise(suma_ventas = sum(ventas)) %>% 
+  arrange(-suma_ventas) %>% 
+  pivot_wider(names_from = anio,
+              values_from = c(suma_ventas), names_prefix = "Ventas_",
+              values_fill = 0)
+
+Top5productos2017 <- suma_ventasXproducto2017[1:5,]
+  
+  
+
+```
+
+# Resumen de resultados
+
+```{r}
+
+
+Top5tiendas2016
+
+
+peores5vendedores_Davenport
+
+
+Top5productos2016
+Top5productos2017
+```
+
