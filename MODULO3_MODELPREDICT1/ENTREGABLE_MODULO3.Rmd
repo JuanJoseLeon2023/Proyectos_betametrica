@@ -1,0 +1,327 @@
+---
+title: "ENTREGABLE_MODULO3"
+author: "JUAN JOSE LEON"
+date: "2023-11-17"
+output: github_document
+---
+
+
+
+```{r librerias, echo=TRUE, message=FALSE, warning=FALSE,comment="",fig.width=12,fig.height=8,fig.align='center'}
+
+library(forecast)
+library(dplyr)
+library(openxlsx)
+
+```
+
+# SECCION A: MODELO DE TASA DE CRECIMIENTO PARA LA OFERTA MONETARIA Y LAS EXPORTACIONES
+
+MODELO 1: TASA DE CRECIMIENTO DE LA MASA MONETARIA (M1)
+
+Se estima el siguiente modelo: 
+
+ln(M1) = B0 + B1*TREND + u
+
+```{r modeloseccionA, echo=TRUE, message=FALSE, warning=FALSE,comment="",fig.width=6,fig.height=4,fig.align='center'}
+
+# Abriendo la base de datos
+
+baseA <- read.xlsx("C:\\Users\\ASUS_PC\\Documents\\CURSOS RSTUDIO\\PROGRAMA EXPERTO EN CIENCIA DE DATOS\\ENTREGABLES Y TRABAJOS\\MODULO 3\\M1_EXPORTACIONES.xlsx", sheet = "BASE", detectDates = T)
+
+
+# Generando los ln de cada variable:
+
+baseA <- baseA %>% 
+  mutate(lnM1 = log(M1),
+         lnEXPORTACIONES = log(EXPORTACIONES))
+
+# Transformando la base en una serie de tiempo (TRIMESTRAL)
+
+tsbaseA <- ts(baseA, start = c(2005,1), frequency = 4)
+
+#  Graficando la serie de tiempo M1
+
+plot(tsbaseA[,"M1"])
+
+# Estimando el modelo
+
+tasaM1 <- tslm(lnM1 ~ trend, data = tsbaseA)
+summary(tasaM1)
+
+# Estimando la tasa de crecimiento relativa compuesta:
+
+(exp(2.567e-02)-1)*100
+
+```
+
+Se puede concluir, que en promedio por trimestre, la Masa monetaria (M1) se incrementa a razón de 2.60%
+
+
+
+MODELO 2: TASA DE CRECIMIENTO DE LAS EXPORTACIONES
+
+Se estima el siguiente modelo: 
+
+ln(EXPORTACIONES) = B0 + B1*TREND + u
+
+
+```{r modeloseccionA2, echo=TRUE, message=FALSE, warning=FALSE,comment="",fig.width=6,fig.height=4,fig.align='center'}
+
+#  Graficando la serie de tiempo EXPORTACIONES
+
+plot(tsbaseA[,"EXPORTACIONES"])
+
+# Estimando el modelo
+
+tasaEXPORTACIONES <- tslm(lnEXPORTACIONES ~ trend, data = tsbaseA)
+summary(tasaEXPORTACIONES)
+
+# Estimando la tasa de crecimiento relativa compuesta:
+
+(exp(0.0183725)-1)*100
+
+```
+Se puede concluir, que para la variable EXPORTACIONES hay una tasa de crecimiento promedio trimestral de 1.85%
+
+
+# SECCION B: MODELO DE REGRESIÓN MÚLTIPLE
+
+Para esta sección, se usa un modelo en el cual se usan las variables del Consumo, en función del ingreso disponible, la riqueza y los rendimientos anuales de los bonos de EEUU, el modelo es de tipo:
+
+consumo = B0 + B1(INGRESO) + B2(RIQUEZA) + B3(RENDBONOS) + u
+
+```{r modeloseccionB, echo=TRUE, message=FALSE, warning=FALSE,comment="",fig.width=6,fig.height=4,fig.align='center'}
+
+# Importando la base de datos
+
+baseB <- read.xlsx("C:\\Users\\ASUS_PC\\Documents\\CURSOS RSTUDIO\\PROGRAMA EXPERTO EN CIENCIA DE DATOS\\ENTREGABLES Y TRABAJOS\\MODULO 3\\GASTO DE CONSUMO REAL.xlsx", sheet = "BASE",detectDates = T)
+
+# Estimando el modelo de regresión multiple
+
+regmultiple <- lm(CONSUMO ~ INGRESO + RIQUEZA + RENDBONOS, data = baseB)
+summary(regmultiple)
+
+
+```
+
+INTERPRETACIÓN DE LOS COEFICIENTES ESTIMADOS:
+
+Al realizar la estimación se encontraron los siguientes hallazgos para cada variable;
+
+1) INGRESO; Presenta una relación directa con la evolución del consumo, ya que por cada unidad de aumento en el ingreso, el consumo
+   incrementa en 0.75 unidades. Este coeficiente es estadísticamente significativo a un nivel de confianza del 99%.
+   
+2) RIQUEZA; Presenta una significancia estadística con un nivel de confianza del 99%. Demuestra una relació directa con la variable
+   explicada, ya que por cada aumento de una unidad en la riqueza el consumo incrementa en 0.034 unidades.
+   
+3) RENDBONOS; Si bien demuestra una relación inversa, ya que mientras el rendimiento anual de los bonos aumenta en una unidad (100 p.b) 
+   el consumo decrece en 2.99 unidades. Se observa que esta variable no es estadísticamente significativa.
+   
+SIGNIFICANCIA GLOBAL DEL MODELO
+
+Se observa un estadístico F de 1.358e+04 y un p-value de 2.2e-16, concluyendo que de manera global el modelo es estadísticamente significativo a un nivel de confianza del 95%.
+
+Así mismo, el coeficiente de determinación ajustado (R^2 ajustado) es del 99.87%.
+
+Para corroborar estos valores, se procede a realizar a continuación los contrastes de los supuestos de MCO.
+
+
+# PRUEBAS DE AUTOCORRELACIÓN
+
+Probando los contrastes de autocorrelación:
+
+```{r autocorrelacion, echo=TRUE, message=FALSE, warning=FALSE,comment="",fig.width=6,fig.height=4,fig.align='center'}
+
+library(dynlm)
+library(nlme)
+library(forecast)
+library(sandwich)
+library(car)
+library(ggplot2)
+library(lmtest)
+
+# Ho = No hay autocorrelación
+# H1 = Si hay autocorrelación
+
+# 1) DURBIN WATSON
+
+dwtest(regmultiple)
+
+
+# 2) CONTRASTE BG (Breusch-Godfrey)
+
+# Probandolo con orden 1
+
+bgtest(regmultiple, order = 1)
+
+
+
+```
+1) DURBIN WATSON: P-value de 0.2552, por lo cual se acepta la hipótesis nula de que el modelo NO tiene problemas de
+   autocorrelación.El DW calculado fue de 1.9255 y se podría indicar tiende a 2 por ende no hay autocorrelación.
+2) BG de orden 1: P - value de 0.914; se acepta la hipotesis nula, concluyendo que NO hay autocorrelación de orden 1.
+   
+
+# PRUEBAS DE HETEROCEDASTICIDAD
+
+Probando los problemas de hetorocedasticidad:
+
+```{r heterocedasticidad, echo=TRUE, message=FALSE, warning=FALSE,comment="",fig.width=6,fig.height=4,fig.align='center'}
+
+# H0 = Homocedasticidad
+# H1 = Heterocedasticidad
+
+# 1) CONTRASTE BREUSH PAGAN (BP)
+
+bptest(regmultiple, data = reg)
+
+# 2) NON CONSTANT ERROR VARIANCE
+
+ncvTest(regmultiple)
+
+# 3) METODO GLEJSER
+
+glejser1 <- lm(abs(regmultiple$residuals) ~ INGRESO, data = baseB)
+summary(glejser1)
+
+glejser2 <- lm(abs(regmultiple$residuals) ~ RIQUEZA, data = baseB)
+summary(glejser2)
+
+glejser3 <- lm(abs(regmultiple$residuals) ~ RENDBONOS, data = baseB)
+summary(glejser3)
+```
+
+1) CONTRASTE BREUSH - PAGAN: Se obtiene un p-value de 0.1237, por lo cual no se rechaza la hipótesis nula y se concluye que no hay problemas de heterocedasticidad.
+   
+2) CONTRASTE NCEV: Se presentó un p-value de 8.5194e-08, por lo cual se rechaza la hipótesis nula y se acepta que el modelo si tiene problemas de heterocedasticidad.
+
+Probando si hay heterocedasticidad en función de cada una de las variables explicativas con el método Glejser se obtuvieron los siguientes resultados:
+
+INGRESO: Coeficiente 0.01184 y p-value de 0.000282
+RIQUEZA: Coeficiente 0.0021573 y p-value de 0.00036
+RENDBONOS: Coeficiente 5.291 y p-value de 0.00701
+
+Por ende, la de mayor significancia fue la variable INGRESO, siendo la posible causa del problema de heterocedasticidad. 
+
+
+# PRUEBAS DE MULTICOLINEALIDAD
+
+Se procede a realizar las pruebas de multicolinealidad: 
+
+```{r multicolinealidad, echo=TRUE, message=FALSE, warning=FALSE,comment="",fig.width=6,fig.height=4,fig.align='center'}
+
+library(GGally)
+
+# 1) MATRIZ DE CORRELACIONES
+
+ggpairs(baseB[3:5])
+
+# 2) FACTOR DE INFLACIÓN DE LA VARIANZA
+
+# Si es mayor que 10 existe un problema severo de multicolinealidad
+
+vif(regmultiple)
+
+```
+
+1) Matriz de Correlaciones; se observa que las variables INGRESO y RIQUEZA están altamente correlacionadas, con un coeficiente de 0.971
+2) VIF: Las variables Ingreso y Riqueza tienen valores de 18.85 y de 17.86 presentando problemas serios de multicolinealidad
+
+
+# ATENUANDO LOS PROBLEMAS DEL MODELO (HETEROCEDASTICIDAD Y MULTICOLINEALIDAD)
+
+Se procede a realizar la siguiente estimación:
+
+1) Se crea una nueva variable llamada RIQUEZAINGRESO que se calculó como el logaritmo natural del ratio RIQUEZA/INGRESO
+2) Se estima la regresión: ln(CONSUMO) = ln(INGRESO) + ln(RIQUEZA/INGRESO) + u
+2) Con esa modificación se solucionan los problemas de Heterocedasticidad y de Multicolinealidad pero se genera un nuevo problema que es la autocorrelación. Para atenuar este caso lo mejor es realizar la estimación por medio de errores estandar libres de autocorrelación.
+
+Los resultados finales indican que el modelo en su conjunto es significativo con un p-value de 2.2e-16 y un R^2 ajustado de 0.99% y así mismo, se mantiene la significancia estadística e cada uno de los coeficientes por medio del método de errores estandar libres de autocorrelación. 
+
+
+```{r modcorregido, echo=TRUE, message=FALSE, warning=FALSE,comment="",fig.width=6,fig.height=4,fig.align='center'}
+
+# Estimando el modelo en logaritmos
+
+baseB <- baseB %>% 
+  mutate(RIQUEZAINGRESO = log(RIQUEZA/INGRESO))
+
+regln <- lm(log(CONSUMO) ~ log(INGRESO) + RIQUEZAINGRESO, data = baseB)
+summary(regln)
+
+
+# AUTOCORRELACION
+
+# 1) DURBIN WATSON
+
+dwtest(regln)
+
+# 2) CONTRASTE BG (Breusch-Godfrey)
+
+bgtest(regln, order = 1)
+
+
+# SOLUCIONANDO AUTOCORRELACIÓN POR MEDIO DE ERRORES ESTANDAR LIBRES DE AUTOCORRELACIÓN
+
+coeftest(regln, vcov = NeweyWest(regln))
+
+
+# HETEROCEDASTICIDAD 
+
+# 1) CONTRASTE BREUSH PAGAN (BP)
+
+bptest(regln, data = reg)
+
+# 2) NON CONSTANT ERROR VARIANCE
+
+ncvTest(regln)
+
+# Conclusión; no hay heterocedasticidad
+
+
+# MULTICOLINEALIDAD
+
+# 1) FACTOR DE INFLACIÓN DE LA VARIANZA
+
+# Si es mayor que 10 existe un problema severo de multicolinealidad
+
+vif(regln)
+
+```
+
+
+# APLICANDO CONTRASTES DE ESTABILIDAD SOBRE EL MODELO FINAL
+
+Se aplican los siguientes contrastes de estabilidad: 
+
+```{r estabilidad, echo=TRUE, message=FALSE, warning=FALSE,comment="",fig.width=6,fig.height=4,fig.align='center'}
+
+library(strucchange)
+
+# CUSUM
+
+medcusum <- efp(regln, data = baseB, type = "OLS-CUSUM")
+plot(medcusum)
+
+# MOSUM
+
+medmosum <- efp(regln, data = baseB, type = "OLS-MOSUM")
+plot(medmosum)
+
+# PRUEBA FORMAL DE CUSUM TEST
+
+# H0: no cambio estructural
+# H1: Si hay cambio estructural
+
+sctest(regln, type = "OLS-CUSUM", data = baseB)
+
+# En este caso el p-value es de 0.002321 y por ende se rechaza la hipotesis nula y se acepta la alternativa, concluyendo
+# que SI HAY CAMBIO ESTRUCTURAL
+
+```
+1) Con las gráficas CUSUM y MOSUM se observa que existe estabilidad en los coeficientes estimados
+2) Con la prueba formal CUSUM test se encuentra un p-value de 0.3386 por lo cual se puede concluir que no existe cambio estrucural en el modelo.
+
+
+
