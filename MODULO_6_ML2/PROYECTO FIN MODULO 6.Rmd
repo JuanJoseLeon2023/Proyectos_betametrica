@@ -1,0 +1,569 @@
+---
+title: "PROYECTO MODULO 6"
+author: "JUAN JOSE LEON"
+date: "2023-12-02"
+output: github_document
+---
+
+
+# TRATAMIENTO PREVIO DE LA BASE DE DATOS
+
+Se procede a depurar y a transformar la base para que quede como la variable a expliar el "peso" por medio de las variables "talla", "sem_gest", "sexo", "edad_mad", "sabe_leer", "con_pren" y "edad2".
+
+```{r librerias, echo=TRUE, message=FALSE, warning=FALSE,comment="",fig.width=12,fig.height=8,fig.align='center'}
+
+# Cargando librerías
+
+library(foreign)
+library(dplyr)
+library(caret)
+library(ROCR)
+library(e1071)
+library(reshape2)
+library(plotly)
+library(pROC)
+library(ROSE)
+
+# Cargando la base de datos y filtrando por la provincia Manabí cuya codificación es 13
+
+datos <- read.spss("C:\\Users\\ASUS_PC\\Documents\\CURSOS RSTUDIO\\PROGRAMA EXPERTO EN CIENCIA DE DATOS\\BASES_DATOS_BASES\\MODULO 6 MACHINE LEARNING II\\machine learning\\ENCUESTA NACIDOS VIVOS\\ENV_2017.sav",
+                   use.value.labels = F, to.data.frame = T)
+
+
+# TRANSFORMANDO VARIABLES A TIPO NUMERICO
+
+datos$prov_nac <- as.numeric(as.character(datos$prov_nac))
+datos$peso <- as.numeric(datos$peso)
+datos$talla <- as.numeric(datos$talla)
+datos$sem_gest <- as.numeric(datos$sem_gest)
+datos$edad_mad <- as.numeric(datos$edad_mad)
+datos$con_pren <- as.numeric(datos$con_pren)
+
+
+# FIltrando por la provincia Manabí (codigo 13) y depurando los datos faltantes 
+
+nuevadata <- datos %>% 
+  filter(prov_nac == 13) %>% 
+  select(peso, talla, sem_gest, sexo, edad_mad, sabe_leer, con_pren) %>% 
+  filter(peso != 99, talla != 99, sem_gest != 99, con_pren != 99, sabe_leer != 9)
+
+
+# MODIFICANDO LA VARIABLE EXPLICADA PARA CATEGORIZARLA DE LA SIGUIENTE MANERA:
+# 1 para los casos en que el peso sea superior a 2500, lo cual se considera un peso adecuado
+# 0 para lo contrario
+
+# Se convierte en una variable categorica de 1 y 0 así: Si peso es > 2500 coloque 1 (peso adecuado) y en caso contrario 0
+
+nuevadata <- nuevadata %>% 
+  mutate(peso = if_else(peso > 2500, 1, 0),
+         sexo = if_else(sexo == 1, 0, 1),
+         sabe_leer = if_else(sabe_leer == 1, 1, 0),
+         con_pren = if_else(con_pren >= 7, 1, 0),
+         edad2 = edad_mad^2)
+
+# Transformando la variable explicada (peso) a tipo factor
+
+nuevadata$peso <- factor(nuevadata$peso)
+
+
+# Recodificando la variable explicada así:
+# Si es 1 se recodifica por la leyenda "adecuado"
+# Si es 0 se codifica en "no.adecuado"
+
+nuevadata <- nuevadata %>% 
+  mutate(peso = recode_factor(peso, '0' = "no.adecuado", '1' = "adecuado"))
+
+# Comprobando la base a  trabajar
+
+table(nuevadata$peso)
+
+str(nuevadata)
+
+
+
+```
+
+
+# PARTICIONANDO LA BASE
+
+Se determina como muestra de entrenamiento para fines del ejercicio el 10% de la base total.
+
+```{r particionando, echo=TRUE, message=FALSE, warning=FALSE,comment="",fig.width=12,fig.height=8,fig.align='center'}
+
+# FIJANDO LA SEMILLA PARA PARTICIONAR LA MUESTRA
+
+set.seed(1234)
+
+# PARTICIONANDO LA MUESTRA DE ENTRENAMIENTO (10%)
+
+entrenamiento <- createDataPartition(nuevadata$peso, p = 0.10, list = F)
+
+
+
+
+```
+
+
+
+# SECCIÓN A: ESTIMACIÓN DEL MODELO SVM
+
+Se realiza la estimación optimizando el hiperparámetro del Costo por medio de validación cruzada. Así mismo, se utiliza un Kernel lineal para facilitar el proceso de cálculo.
+
+
+```{r estimandoSVM, echo=TRUE, message=FALSE, warning=FALSE,comment="",fig.width=8,fig.height=6,fig.align='center'}
+
+# Estimando el modelo 
+
+modelo.tuneado <- tune(svm, peso ~ .,
+                       data = nuevadata[entrenamiento,],
+                       ranges = list(cos = c(0.001, 0.01, 0.1, 1, 5, 10, 50)),
+                       kernel = "linear", scale = T, probability = T)
+
+summary(modelo.tuneado)
+
+# Se identifica que el costo que optimiza el modelo es de 0.1; esto se puede comprobar con la siguiente gráfica:
+
+ggplot(data = modelo.tuneado$performances,
+       aes(x = cos, y = error))+
+  geom_line()+
+  geom_point()+
+  labs(title = "Error de validación Vs. Hiperparámetro C (Costo)")+
+  theme_bw()+
+  theme(plot.title = element_text(hjust = 0.5))
+
+# Estimando el mejor modelo con el costo de 0.1
+
+mejor.modelo <- modelo.tuneado$best.model
+
+summary(mejor.modelo)
+
+
+```
+
+Se concluye en esta primera sección del ejercicio, que el mejor módelo aplicando la validación cruzada es aquel que tiene un costo de 0.1 ya que dicho hiperparámetro minimiza el error.
+
+
+
+# SECCION B; EVALUACIÓN DEL MODELO Y PRONÓSTICO FUERA DE LA MUESTRA
+
+A continuación, se procede a evaluar el modelo por medio de Matriz de Clasificación, Curva Roc y Area bajo la curva:
+
+```{r EvaluandoSVM, echo=TRUE, message=FALSE, warning=FALSE,comment="",fig.width=8,fig.height=6,fig.align='center'}
+
+# ESTIMANDO LOS VALORES AJUSTADOS; UMBRAL = 0.5
+
+ajustados.mejor.modelo <- predict(mejor.modelo,
+                                  nuevadata[entrenamiento,],
+                                  type = "prob", probability = T)
+
+# Se valida en cual columna está el criterio de estudio, en este caso "adecuado" está en la columna 2 de la base de datos trabajada lo cual se utilizará en la matriz de confusión
+
+levels(nuevadata$peso)
+
+
+# CALCULANDO LA MATRIZ DE CONFUSIÓN O DE CLASIFICACIÓN
+
+confusionMatrix(ajustados.mejor.modelo, 
+                nuevadata$peso[entrenamiento], positive = levels(nuevadata$peso)[2])
+
+# Se observa un accuracy del modelo de 92% con una muy alta sensitividad (0.9917) y una baja especificidad (0.2348)
+# Esto puede estar explicado por la posible existencia de un desbalanceo en la muestra, ya que como se muestra a continuación, el criterio de "adecuado" en la variable peso concentra la mayoría de las observaciones (90% en la muestra de entrenamiento)
+
+table(nuevadata$peso[entrenamiento])
+
+
+
+# ESTIMANDO LA CURVA ROC Y EL ÁREA BAJO LA CURVA
+
+# Guardando las predicciones de la muestra de entrenamiento
+
+pred <- prediction(attr(ajustados.mejor.modelo, "probabilities")[,2],
+                   nuevadata$peso[entrenamiento])
+
+# Definiendo el desempeño o performance
+
+perf <- performance(pred, "tpr", "fpr")
+
+# Graficando curva ROC
+
+plot(perf, colorize = T, lty = 3)
+abline(0, 1, col = "black")
+
+
+# CALCULANDO EL ÁREA BAJO LA CURVA
+
+aucmodelo1 <- performance(pred, measure = "auc") 
+
+aucmodelo1 <- aucmodelo1@y.values[[1]]
+
+aucmodelo1
+
+# El área bajo la curva ROC es de 85.49%
+
+
+```
+
+
+A continuación se determinaron los puntos de corte óptimo según según los enfoques MC, CROC y AUC: 
+
+```{r puntocorte, echo=TRUE, message=FALSE, warning=FALSE,comment="",fig.width=8,fig.height=6,fig.align='center'}
+
+# ---- ENFOQUE 1; MAXIMIZANDO SENSITIVIDAD Y ESPECIFICIDAD:----
+
+perf1 <- performance(pred, "sens", "spec")
+
+# Guardando sensitividad, especificidad y alpha
+
+sen <- slot(perf1, "y.values"[[1]])
+esp <- slot(perf1, "x.values"[[1]])
+alf <- slot(perf1, "alpha.values"[[1]])
+
+# Generando una matriz que contenga los tres parametros
+
+mat <- data.frame(alf, sen, esp)
+
+# En este caso, fue necesario renombrar las columnas de la matriz
+
+names(mat)[1] <- "alf"
+names(mat)[2] <- "sen"
+names(mat)[3] <- "esp"
+
+# Convirtiendo la base en tipo panel
+
+m <- melt(mat, id = c("alf"))
+
+
+# Graficando para encontrar el punto de corte óptimo:
+
+p1 <- ggplot(m, aes(alf, value, group = variable, colour = variable))+
+  geom_line(size=1.2)+
+  labs(title = "Punto de Corte Optimo para SVM",
+       x = "Cut Off", y = "")
+
+p1
+
+# En este caso arroja un punto de corte muy bajo, de 0.09008 (9%)
+
+
+
+# ---- ENFOQUE 2: DETERMINAR EL UMBRAL QUE MAXIMIZA EL ACCURACY DEL MODELO ----
+
+max.accuracy <- performance(pred, measure = "acc")
+
+# Graficando
+
+plot(max.accuracy)
+
+# Encontranto el punto que maximiza el accuracy
+
+indice <- which.max(slot(max.accuracy, "y.values")[[1]])
+
+acc <- slot(max.accuracy, "y.values")[[1]][indice]
+
+cutoff <- slot(max.accuracy, "x.values")[[1]][indice]
+
+print(c(accuracy = acc, cutoff = cutoff))
+
+# Con esta metodología el punto óptimo es 0.5068994 (51%)
+
+
+
+# ---- ENFOQUE 3; ENCONTRANDO EL MÁXIMO EN LA CURVA ROC ----
+
+prediccionescutoff <- attr(ajustados.mejor.modelo, "probabilities")[,1]
+
+curvaroc <- plot.roc(nuevadata$peso[entrenamiento], as.vector(prediccionescutoff),
+                     precent = T, ci = T, print.auc = T, thresholds = "best", print.thres = "best")
+
+# Con este método, el punto de corte óptimo es de 0.924 (92%)
+
+```
+
+
+# Utilizando el modelo SVM para realizar pronóstico fuera de la muestra
+
+Se crea un individuo nuevo con las siguientes condiciones: 
+talla = 44, sem_gest = 38, sexo = 0, edad_mad = 19, sabe_leer = 1, con_pren = 0
+
+Los resultados fueron los siguientes:
+
+```{r pronfuera, echo=TRUE, message=FALSE, warning=FALSE,comment="",fig.width=8,fig.height=6,fig.align='center'}
+
+newdata <- data.frame(talla = 44, sem_gest = 38, sexo = 0, edad_mad = 19, sabe_leer = 1, con_pren = 0, edad2 = (19*19))
+
+# Haciendo el pronóstico fuera de la muestra
+
+probabilidadfuera <- predict(mejor.modelo, newdata = newdata, probability = T)
+
+probabilidadfuera
+
+# En este caso se obtienen las siguientes probabilidades:
+# adecuado  no.adecuado
+# 0.549591    0.450406
+
+
+# Al hacer el pronóstico tomando de referencia un umbral óptimo de 0.50 (50%) se espera que el peso sea "adecuado"
+
+pronostico <- predict(mejor.modelo, newdata = newdata, probability = T)
+
+pronostico
+
+
+# ---- PRONÓSTICO CAMBIANDO EL UMBRAL ----
+
+# Cambiando el umbral por el umbral optimo calculado como aquel que maximizaba el accuracy
+
+umbraloptimo <- as.numeric(cutoff) # Umbral optimizado en 51%
+
+# Seleccionando la probabilidad de que sea adecuado el peso en el pronóstico por fuera de la muestra
+
+piadecuado <- as.numeric(attr(probabilidadfuera, "probabilities")[,1])
+
+# Pronóstico con un umbral óptimizado (51%) = se clasificaría como "adecuado"
+
+pronumbraloptimo <- factor(ifelse(piadecuado > umbraloptimo, "adecuado", "no.adecuado"))
+
+pronumbraloptimo
+
+
+```
+
+
+# SECCION C: HACIENDO REMUESTREO DE LA BASE CON METODOLOGÍA ROSE
+
+A continuación se ajusta por medio de remuestreo la base de entrenamiento:
+
+```{r remuestreoRose, echo=TRUE, message=FALSE, warning=FALSE,comment="",fig.width=8,fig.height=6,fig.align='center'}
+
+# Transformando la base de entrenamiento a base de datos
+
+train_data <- nuevadata[entrenamiento,]
+
+# Revisando la posible desproporción de la base con una tabla:
+
+table(train_data$peso)
+
+# ---- HACIENDO EL REMUESTREO CON TÉCNICA ROSE ----
+
+roses <- ROSE(peso ~ ., data = train_data, seed = 1)$data
+
+# Validando con table
+
+table(roses$peso)
+
+# Con esto se han equilibrado las dos categorías de estudio en la variable peso
+
+```
+
+
+Luego se construye el modelo SVM con la base ajustada por remuestreo y se optimiza el costo por medio de validación cruzada:
+
+```{r estimandoSVMremuestreo, echo=TRUE, message=FALSE, warning=FALSE,comment="",fig.width=8,fig.height=6,fig.align='center'}
+
+# Estimando el modelo 
+
+modelo.roses <- tune(svm, peso ~ .,
+                       data = roses,
+                       ranges = list(cos = c(0.001, 0.01, 0.1, 1, 5, 10, 50)),
+                       kernel = "linear", scale = T, probability = T)
+
+summary(modelo.roses)
+
+# Estimando el mejor modelo con el costo optimizado de 1
+
+mejor.modelo.roses <- modelo.roses$best.model
+
+summary(mejor.modelo.roses)
+
+```
+
+
+
+A continuación, se procede a evaluar el modelo por medio de Matriz de Clasificación, Curva Roc y Area bajo la curva:
+
+```{r EvaluandoSVMremuestreo, echo=TRUE, message=FALSE, warning=FALSE,comment="",fig.width=8,fig.height=6,fig.align='center'}
+
+# ESTIMANDO LOS VALORES AJUSTADOS; UMBRAL = 0.5
+
+ajustados.mejor.modelo.rose <- predict(mejor.modelo.roses,
+                                  roses,
+                                  type = "prob", probability = T)
+
+# Se valida en cual columna está el criterio de estudio, en este caso "adecuado" está en la columna 1 del vector de valores ajustados creados
+
+levels(ajustados.mejor.modelo.rose)
+
+
+# ----CALCULANDO LA MATRIZ DE CONFUSIÓN O DE CLASIFICACIÓN----
+
+confusionMatrix(roses$peso, ajustados.mejor.modelo.rose, dnn = c("actuales", "predichos"),
+                levels(ajustados.mejor.modelo.rose)[1])
+
+# En este caso se observa un accuracy de 0.7398 y un mayor equilibrio entre la sensitividad y especificidad
+
+
+
+# ----ESTIMANDO LA CURVA ROC Y EL ÁREA BAJO LA CURVA----
+
+# Guardando las predicciones de la muestra de entrenamiento
+
+predrose <- prediction(attr(ajustados.mejor.modelo.rose, "probabilities")[,2],
+                   roses$peso)
+
+# Gráfica ROC y área bajo la curva = 0.820
+
+roc.curve(roses$peso, attr(ajustados.mejor.modelo.rose, "probabilities")[,2], col = "blue")
+
+# Comparando con la  curva roc del modelo original
+
+roc.curve(nuevadata$peso[entrenamiento], attr(ajustados.mejor.modelo, "probabilities")[,2], col = "red", add.roc = T)
+
+# El modelo ajustado por remuestreo presenta un área bajo la curva de 0.82 respecto al área del modelo inicial de 0.854
+
+
+```
+
+
+A continuación se determinaron los puntos de corte óptimo para el modelo ajustado por remuestreo según según los enfoques MC, CROC y AUC: 
+
+```{r puntocorteSVMremuestreo, echo=TRUE, message=FALSE, warning=FALSE,comment="",fig.width=8,fig.height=6,fig.align='center'}
+
+# ---- ENFOQUE 1; MAXIMIZANDO SENSITIVIDAD Y ESPECIFICIDAD:----
+
+perf1rose <- performance(predrose, "sens", "spec")
+
+# Guardando sensitividad, especificidad y alpha
+
+senrose <- slot(perf1rose, "y.values"[[1]])
+esprose <- slot(perf1rose, "x.values"[[1]])
+alfrose <- slot(perf1rose, "alpha.values"[[1]])
+
+# Generando una matriz que contenga los tres parametros
+
+matRose <- data.frame(alfrose, senrose, esprose)
+
+# En este caso, fue necesario renombrar las columnas de la matriz
+
+names(matRose)[1] <- "alf"
+names(matRose)[2] <- "sen"
+names(matRose)[3] <- "esp"
+
+# Convirtiendo la base en tipo panel
+
+mRose <- melt(matRose, id = c("alf"))
+
+
+# Graficando para encontrar el punto de corte óptimo:
+
+p1Rose <- ggplot(mRose, aes(alf, value, group = variable, colour = variable))+
+  geom_line(size=1.2)+
+  labs(title = "Punto de Corte Optimo para SVM Ajustado por ROSE",
+       x = "Cut Off ROSE", y = "")
+
+p1Rose
+
+# En este caso arroja un punto de corte muy bajo, de 0.4588 (46%)
+
+
+
+# ---- ENFOQUE 2: DETERMINAR EL UMBRAL QUE MAXIMIZA EL ACCURACY DEL MODELO ----
+
+max.accuracy.Rose <- performance(predrose, measure = "acc")
+
+# Graficando
+
+plot(max.accuracy.Rose)
+
+# Encontranto el punto que maximiza el accuracy
+
+indiceRose <- which.max(slot(max.accuracy.Rose, "y.values")[[1]])
+
+accRose <- slot(max.accuracy.Rose, "y.values")[[1]][indiceRose]
+
+cutoffRose <- slot(max.accuracy.Rose, "x.values")[[1]][indiceRose]
+
+print(c(accuracy = accRose, cutoff = cutoffRose))
+
+# Con esta metodología el punto óptimo es 0.46 (46%)
+
+
+
+# ---- ENFOQUE 3; ENCONTRANDO EL MÁXIMO EN LA CURVA ROC ----
+
+prediccionescutoffRose <- attr(ajustados.mejor.modelo.rose, "probabilities")[,1]
+
+curvarocRose <- plot.roc(roses$peso, as.vector(prediccionescutoffRose),
+                     precent = T, ci = T, print.auc = T, thresholds = "best", print.thres = "best")
+
+# Con este método, el punto de corte óptimo es de 0.539 (54%)
+
+```
+
+
+# Pronóstico fuera de la muestra con SVM ajustado por método de remuestreo ROSE
+
+Se toma el mismo ejemplo del individuo creado en la sección B.
+
+```{r pronfueraSVMremuestreo, echo=TRUE, message=FALSE, warning=FALSE,comment="",fig.width=8,fig.height=6,fig.align='center'}
+
+# Haciendo el pronóstico fuera de la muestra
+
+probabilidadfueraRose <- predict(mejor.modelo.roses, newdata = newdata, probability = T)
+
+probabilidadfueraRose
+
+# En este caso se obtienen las siguientes probabilidades:
+# adecuado    no.adecuado
+# 0.1449234    0.8550766
+
+
+# Al hacer el pronóstico tomando de referencia un umbral óptimo de 0.50 (50%) se espera que el peso sea "adecuado"
+
+pronosticoRose <- predict(mejor.modelo.roses, newdata = newdata, probability = T)
+
+pronosticoRose
+
+
+# ---- PRONÓSTICO CAMBIANDO EL UMBRAL ----
+
+# Cambiando el umbral por el umbral optimo calculado como aquel que maximizaba el accuracy para el modelo ajustado por remuestreo
+
+umbraloptimoRose <- as.numeric(cutoffRose) # Umbral optimizado en 46%
+
+# Seleccionando la probabilidad de que sea adecuado el peso en el pronóstico por fuera de la muestra
+
+piadecuadoRose <- as.numeric(attr(probabilidadfueraRose, "probabilities")[,1])
+
+# Pronóstico con un umbral óptimizado (46%) = se clasificaría como "adecuado"
+
+pronumbraloptimoRose <- factor(ifelse(piadecuadoRose > umbraloptimoRose, "adecuado", "no.adecuado"))
+
+pronumbraloptimoRose
+
+
+```
+
+# Uniendo los resultados de los pronósticos de los dos SVM construidos 
+
+Se unifica en una sola base de datos los pronósticos hechos, dentro y fuera de la muestra con el modelo SVM y el modelo SVM ajustado por método Rose:
+
+```{r unionpronosticos, echo=TRUE, message=FALSE, warning=FALSE,comment="",fig.width=8,fig.height=6,fig.align='center'}
+
+pronosticosmodelosfueramuestra <- data.frame(SVM = pronumbraloptimo, SVMROS = pronumbraloptimoRose)
+pronmodfueramuestraPi <- data.frame(SVM = piadecuado, SVMROS = piadecuadoRose)
+
+pronosticosmodelosdentromuestra <- data.frame(SVM = ajustados.mejor.modelo, SVMROS = ajustados.mejor.modelo.rose)
+
+table(pronosticosmodelosdentromuestra)
+
+```
+
+# Conclusiones
+
+En términos generales, al ajustar la muestra por el desbalanceo existente, se observaron los siguientes cambios:
+
+1) En cuanto a la curva ROC, el modelo SVM presentó un área bajo la curva de 0.854 mientras que el modelo calculado con el método ROSE fue de 0.82 lo cual no representa una diferencia apreciable.
+2) En cuanto al accuracy de los modelos, el SVM presentó un valor de 91,91% mientras que el SVM ajustado con ROSE fue de 73,98%; en este parámetro sí se observa una variación significativa entre las dos metodologías.
+
+En términos particulares, se puede observar que para el individuo construído y pronosticado fuera de la muestra, los valores calculados cambiaron muy significativamente, ya que bajo las mismas condiciones en el SVM presentó una probabilidad de que el niño presentara un peso "adecuado" de 55% mientras que al balancear la muestra de entrenamiento se obtuvo una probabilidad de 14%. Esta diferencia sustancial conllevó a que en los dos modelos se clasificara al individuo de manera diferente; mientras en el SVM quedó clasificado con peso "adecuado" en el modelo SVM ajustado por ROSE quedó clasificado como "no.adecuado".
+
